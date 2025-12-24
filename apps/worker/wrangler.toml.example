@@ -6,6 +6,14 @@ compatibility_flags = ["nodejs_compat"]
 workers_dev = false
 preview_urls = false
 
+[assets]
+# Serve the Vite build output as Static Assets from the same Worker.
+directory = "../web/dist"
+# SPA mode: when a request doesn't match an asset, return index.html (for HTML navigations).
+not_found_handling = "single-page-application"
+# Only these routes should invoke the User Worker (Hono). Everything else is served as static assets.
+run_worker_first = ["/api/*", "/auth/*", "/healthz*"]
+
 [vars]
 RP_NAME = "Inkrypt"
 RP_ID = "notes.example.com"
