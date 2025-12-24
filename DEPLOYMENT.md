@@ -6,8 +6,8 @@ Inkrypt 是一款基于 Passkey 的端到端加密笔记应用——你的笔记
 
 | 组件 | 技术 | 部署目标 |
 |------|------|----------|
-| 前端 | Vite + React | Cloudflare Pages |
-| 后端 | Hono | Cloudflare Workers |
+| 前端 | Vite + React | Cloudflare Workers Static Assets |
+| 后端 | Hono | Cloudflare Workers（同一个 Worker 内） |
 | 存储 | D1 | Cloudflare D1 |
 | 限流 | Durable Objects | Cloudflare DO |
 
@@ -15,25 +15,13 @@ Inkrypt 是一款基于 Passkey 的端到端加密笔记应用——你的笔记
 
 ## 部署前必读
 
-### 1. 推荐同域部署
-
-前端和后端放在同一个域名下是最省心的方式：
-
-```
-https://notes.example.com/*       → Pages（静态资源）
-https://notes.example.com/api/*   → Worker（API）
-https://notes.example.com/auth/*  → Worker（认证）
-```
-
-这样不需要处理跨域，Cookie 和 WebAuthn 都最稳定。
-
-### 2. 域名定了就别改
+### 1. 域名定了就别改
 
 后端用 `RP_ID`（域名）和 `ORIGIN`（完整地址）验证 Passkey。上线后改域名会导致已有 Passkey 失效。
 
-### 3. 不支持跨站部署
+### 2. 不支持跨站部署
 
-前端在 `*.pages.dev`、后端在 `example.com` 这种跨站组合会被 CSRF 保护拦截，不支持。
+前后端不在同一站点会被 CSRF 保护拦截，不支持。
 
 ---
 
@@ -42,7 +30,7 @@ https://notes.example.com/auth/*  → Worker（认证）
 **Cloudflare 侧**：
 - Cloudflare 账号
 - 一个域名（已托管到 Cloudflare）
-- 开通 Workers、Pages、D1、Durable Objects
+- 开通 Workers、D1、Durable Objects
 
 **本地**：
 - Node.js 20+
@@ -54,12 +42,10 @@ https://notes.example.com/auth/*  → Worker（认证）
 
 本仓库内置 GitHub Actions 工作流：`.github/workflows/deploy.yml`，可在 GitHub 上一键完成：
 
-- Pages 项目创建与部署（Direct Upload）
-- Worker 部署（含 D1/DO）
+- Worker 部署（包含静态资源 + API，含 D1/DO）
 - D1 创建与 migrations
-- Pages 自定义域名绑定
-- DNS CNAME 自动配置
-- Worker Routes 自动配置（`/api/*`、`/auth/*`、`/healthz*`）
+- DNS 记录自动配置（Worker-only）
+- Worker Routes 自动配置（`/*`，内部仅 `/api/*`、`/auth/*`、`/healthz*` 走代码）
 
 ### 你需要准备
 
@@ -70,7 +56,7 @@ https://notes.example.com/auth/*  → Worker（认证）
 ### Token 权限建议（最小集）
 
 - Zone：`Zone:Read`、`DNS:Edit`、`Workers Routes:Edit`
-- Account：`Pages:Edit`、`Workers Scripts:Edit`、`D1:Edit`
+- Account：`Workers Scripts:Edit`、`D1:Edit`
 
 ### Durable Objects（SQLite 后端）
 
@@ -91,7 +77,6 @@ https://notes.example.com/auth/*  → Worker（认证）
 
 - `force_takeover_dns=true`：当 `DOMAIN` 已存在 DNS 记录但不匹配时，允许覆盖
 - `force_takeover_routes=true`：当目标路由已绑定其他 Worker 时，允许接管
-- `wait_for_tls=false`：不等待证书/HTTPS 可用（默认会等待）
 
 ---
 
@@ -155,28 +140,18 @@ npx wrangler deploy
 
 ## 步骤 5：部署前端
 
-1. 打开 Cloudflare Dashboard → Pages → 创建项目
-2. 绑定你的 Git 仓库
-3. 配置构建：
-   - **Build command**: `npm ci && npm --workspace apps/web run build`
-   - **Output directory**: `apps/web/dist`
-   - **Environment**: `NODE_VERSION=22`
+前端静态资源会随 Worker 一起部署（Workers Static Assets），无需创建 Pages 项目。
 
 ---
 
 ## 步骤 6：配置路由
 
-### 给 Pages 绑定域名
-
-Pages 项目 → 自定义域名 → 添加 `notes.example.com`
-
 ### 给 Worker 添加路由
 
 Worker → Triggers → Routes → 添加：
-- `notes.example.com/api/*`
-- `notes.example.com/auth/*`
+- `notes.example.com/*`
 
-这样 `/api` 和 `/auth` 走 Worker，其他走 Pages。
+这样整个站点都由同一个 Worker 提供：静态资源由 Static Assets 返回，`/api`、`/auth` 等路径由 Hono 代码处理。
 
 ---
 

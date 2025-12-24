@@ -164,7 +164,7 @@ async function resolveZone({ token, domain }) {
   throw new Error(`No active Cloudflare zone found for DOMAIN=${normalized}. Is it added to Cloudflare and does the token have Zone:Read?`)
 }
 
-async function ensureDnsCname({ token, zoneId, recordName, target, proxied, force }) {
+async function ensureDnsA({ token, zoneId, recordName, ip, proxied, force }) {
   const records = await cf(token, {
     method: 'GET',
     path: `/zones/${zoneId}/dns_records`,
@@ -178,9 +178,9 @@ async function ensureDnsCname({ token, zoneId, recordName, target, proxied, forc
   }
 
   const desired = {
-    type: 'CNAME',
+    type: 'A',
     name: recordName,
-    content: target,
+    content: ip,
     ttl: 1,
     proxied: proxied ?? true,
   }
@@ -194,14 +194,14 @@ async function ensureDnsCname({ token, zoneId, recordName, target, proxied, forc
   const matches =
     record?.type === desired.type &&
     String(record?.name).toLowerCase() === String(desired.name).toLowerCase() &&
-    String(record?.content).toLowerCase() === String(desired.content).toLowerCase() &&
+    String(record?.content) === String(desired.content) &&
     Boolean(record?.proxied) === Boolean(desired.proxied)
 
   if (matches) return { action: 'unchanged', id: record.id }
 
   if (!force) {
     throw new Error(
-      `DNS record for ${recordName} exists but does not match expected CNAME -> ${target}. Set FORCE_TAKEOVER_DNS=true to override.`,
+      `DNS record for ${recordName} exists but does not match expected A -> ${ip}. Set FORCE_TAKEOVER_DNS=true to override.`,
     )
   }
 
@@ -211,60 +211,6 @@ async function ensureDnsCname({ token, zoneId, recordName, target, proxied, forc
     body: desired,
   })
   return { action: 'updated', id: updated?.id ?? record.id }
-}
-
-async function ensurePagesDomain({ token, accountId, projectName, domain }) {
-  const domains = await cf(token, {
-    method: 'GET',
-    path: `/accounts/${accountId}/pages/projects/${projectName}/domains`,
-  })
-
-  const list = Array.isArray(domains) ? domains : []
-  const found = list.find((d) => String(d?.name).toLowerCase() === String(domain).toLowerCase())
-  if (found) return { action: 'exists', domain: found }
-
-  const created = await cf(token, {
-    method: 'POST',
-    path: `/accounts/${accountId}/pages/projects/${projectName}/domains`,
-    body: { name: domain },
-  })
-  return { action: 'created', domain: created }
-}
-
-async function ensurePagesProject({ token, accountId, projectName, productionBranch }) {
-  try {
-    const project = await cf(token, {
-      method: 'GET',
-      path: `/accounts/${accountId}/pages/projects/${projectName}`,
-    })
-    return { action: 'exists', project }
-  } catch (err) {
-    if (err instanceof CloudflareApiError && err.status === 404) {
-      // Continue to create.
-    } else {
-      throw err
-    }
-  }
-
-  const project = await cf(token, {
-    method: 'POST',
-    path: `/accounts/${accountId}/pages/projects`,
-    body: {
-      name: projectName,
-      production_branch: productionBranch,
-    },
-  })
-
-  return { action: 'created', project }
-}
-
-async function retryPagesDomainValidation({ token, accountId, projectName, domain }) {
-  // "Retry the validation status of a single domain."
-  const updated = await cf(token, {
-    method: 'PATCH',
-    path: `/accounts/${accountId}/pages/projects/${projectName}/domains/${domain}`,
-  })
-  return updated
 }
 
 async function ensureWorkerRoutes({ token, zoneId, workerName, patterns, force }) {
@@ -299,27 +245,6 @@ async function ensureWorkerRoutes({ token, zoneId, workerName, patterns, force }
   }
 }
 
-async function waitForHttps({ domain, timeoutSeconds, intervalSeconds }) {
-  const deadline = Date.now() + timeoutSeconds * 1000
-  const url = `https://${domain}/`
-  let lastError = null
-
-  while (Date.now() < deadline) {
-    try {
-      const resp = await fetch(url, { method: 'HEAD', redirect: 'manual' })
-      // 522/525/526 are typical "not ready" statuses. Any other response indicates TLS + routing is working.
-      if (![522, 525, 526].includes(resp.status)) return
-      lastError = new Error(`HTTP ${resp.status}`)
-    } catch (err) {
-      lastError = err
-    }
-
-    await new Promise((r) => setTimeout(r, intervalSeconds * 1000))
-  }
-
-  throw new Error(`Timed out waiting for TLS/HTTPS on ${url}. Last error: ${lastError ? String(lastError) : 'unknown'}`)
-}
-
 function parseBool(v) {
   if (typeof v === 'boolean') return v
   if (v === undefined) return false
@@ -332,8 +257,7 @@ function usage() {
   return `
 Usage:
   node deploy/cf-api.mjs resolve-zone --domain <domain>
-  node deploy/cf-api.mjs ensure-pages-project --account-id <id> --project-name <name> [--production-branch main]
-  node deploy/cf-api.mjs ensure-pages-domain --domain <domain> --account-id <id> --project-name <name> --zone-id <id> --cname-target <target> [--force-dns] [--wait-tls]
+  node deploy/cf-api.mjs ensure-dns-a --zone-id <id> --name <fqdn> [--ip 192.0.2.1] [--proxied true|false] [--force]
   node deploy/cf-api.mjs ensure-worker-routes --zone-id <id> --worker-name <name> --route <pattern> [--route <pattern> ...] [--force]
 
 Auth:
@@ -360,58 +284,18 @@ if (cmd === 'resolve-zone') {
   process.exit(0)
 }
 
-if (cmd === 'ensure-pages-project') {
-  const accountId = String(args['account-id'] ?? '').trim()
-  const projectName = String(args['project-name'] ?? '').trim()
-  const productionBranch = String(args['production-branch'] ?? 'main').trim() || 'main'
-
-  if (!accountId) throw new Error('--account-id is required')
-  if (!projectName) throw new Error('--project-name is required')
-
-  const result = await ensurePagesProject({ token, accountId, projectName, productionBranch })
-  process.stdout.write(`Pages project: ${result.action}\n`)
-  process.exit(0)
-}
-
-if (cmd === 'ensure-pages-domain') {
-  const domain = normalizeDomain(args.domain ?? process.env.DOMAIN ?? process.env.INKRYPT_DOMAIN)
-  const accountId = String(args['account-id'] ?? '').trim()
-  const projectName = String(args['project-name'] ?? '').trim()
+if (cmd === 'ensure-dns-a') {
   const zoneId = String(args['zone-id'] ?? '').trim()
-  const cnameTarget = String(args['cname-target'] ?? '').trim()
+  const name = normalizeDomain(args.name ?? args.domain ?? process.env.DOMAIN ?? process.env.INKRYPT_DOMAIN)
+  const ip = String(args.ip ?? '192.0.2.1').trim() || '192.0.2.1'
+  const proxied = args.proxied === undefined ? true : parseBool(args.proxied)
+  const force = parseBool(args.force ?? process.env.FORCE_TAKEOVER_DNS)
 
-  if (!accountId) throw new Error('--account-id is required')
-  if (!projectName) throw new Error('--project-name is required')
   if (!zoneId) throw new Error('--zone-id is required')
-  if (!cnameTarget) throw new Error('--cname-target is required')
+  if (!name) throw new Error('--name is required')
 
-  const forceDns = parseBool(args['force-dns'] ?? process.env.FORCE_TAKEOVER_DNS)
-  const waitTls = parseBool(args['wait-tls'] ?? process.env.WAIT_FOR_TLS)
-
-  const pages = await ensurePagesDomain({ token, accountId, projectName, domain })
-  process.stdout.write(`Pages domain: ${pages.action}\n`)
-
-  const dns = await ensureDnsCname({
-    token,
-    zoneId,
-    recordName: domain,
-    target: cnameTarget,
-    proxied: true,
-    force: forceDns,
-  })
-  process.stdout.write(`DNS CNAME ${domain} -> ${cnameTarget}: ${dns.action}\n`)
-
-  await retryPagesDomainValidation({ token, accountId, projectName, domain })
-  process.stdout.write(`Pages domain validation: retried\n`)
-
-  if (waitTls) {
-    const timeoutSeconds = Number(args['tls-timeout'] ?? 600)
-    const intervalSeconds = Number(args['tls-interval'] ?? 10)
-    process.stdout.write(`Waiting for HTTPS to become available (timeout=${timeoutSeconds}s)...\n`)
-    await waitForHttps({ domain, timeoutSeconds, intervalSeconds })
-    process.stdout.write(`HTTPS is reachable: https://${domain}\n`)
-  }
-
+  const dns = await ensureDnsA({ token, zoneId, recordName: name, ip, proxied, force })
+  process.stdout.write(`DNS A ${name} -> ${ip}: ${dns.action}\n`)
   process.exit(0)
 }
 
