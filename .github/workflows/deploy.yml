@@ -117,13 +117,12 @@ jobs:
         run: npm --workspace apps/web run build
 
       - name: Deploy Pages (Direct Upload)
-        uses: cloudflare/pages-action@v1
+        uses: cloudflare/wrangler-action@v3
         with:
           apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           accountId: ${{ steps.zone.outputs.account_id }}
-          projectName: ${{ steps.cfg.outputs.pages_project_name }}
-          directory: apps/web/dist
-          branch: main
+          command:
+            pages deploy apps/web/dist --project-name "${{ steps.cfg.outputs.pages_project_name }}" --branch main
 
       - name: Bind custom domain + DNS (Pages)
         run: node deploy/cf-api.mjs ensure-pages-domain --domain "${{ steps.cfg.outputs.domain }}" --account-id "${{ steps.zone.outputs.account_id }}" --project-name "${{ steps.cfg.outputs.pages_project_name }}" --zone-id "${{ steps.zone.outputs.zone_id }}" --cname-target "${{ steps.cfg.outputs.cname_target }}"
