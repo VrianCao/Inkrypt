@@ -28,3 +28,6 @@ apps/worker/.dev.vars
 # local public mirror
 Inkrypt-Public/
 
+# amp orb portal state
+.amp/portals/
+
