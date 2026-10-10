@@ -125,28 +125,26 @@
 Token 最小权限建议：
 
 - Zone：`Zone:Read`、`DNS:Edit`、`Workers Routes:Edit`
-- Account：`Pages:Edit`、`Workers Scripts:Edit`、`D1:Edit`
+- Account：`Workers Scripts:Edit`、`D1:Edit`
 
 ### 3) 运行部署工作流
 
 进入仓库 → Actions → `Deploy Inkrypt` → Run workflow：
 
 - 必填：`domain`
-- 选填：`rp_name`、`cors_origin`、`pages_project_name`、`worker_name`、`d1_name`、`d1_location`
+- 选填：`rp_name`、`cors_origin`、`worker_name`、`d1_name`、`d1_location`
 
 安全开关（默认谨慎）：
 
 - `force_takeover_dns=true`：允许覆盖已存在但不匹配的 DNS 记录
 - `force_takeover_routes=true`：允许接管已被其他 Worker 占用的 Routes
-- `wait_for_tls=false`：不等待 HTTPS 就绪（默认会等待）
 
 该工作流会自动完成：
 
-- Pages 项目创建与部署（Direct Upload）
-- Worker 部署（含 D1/DO）
+- Worker 部署（包含静态资源 + API，含 D1/DO）
 - D1 创建与 migrations
-- Pages 自定义域名绑定 + DNS CNAME 自动配置
-- Worker Routes 自动配置（`/api/*`、`/auth/*`、`/healthz*`）
+- DNS 记录自动配置（Worker-only）
+- Worker Routes 自动配置（`/*`，内部仅 `/api/*`、`/auth/*`、`/healthz*` 走代码）
 - Smoke test：访问 `https://<DOMAIN>/healthz`
 
 ### 4) 部署完成后

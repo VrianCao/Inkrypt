@@ -22,11 +22,6 @@ on:
         required: false
         default: ''
         type: string
-      pages_project_name:
-        description: 'Override Pages project name (optional)'
-        required: false
-        default: ''
-        type: string
       worker_name:
         description: 'Override Worker name (optional)'
         required: false
@@ -52,11 +47,6 @@ on:
         required: false
         default: 'false'
         type: string
-      wait_for_tls:
-        description: 'Wait until https://<DOMAIN> becomes reachable (true/false)'
-        required: false
-        default: 'true'
-        type: string
 
 concurrency:
   group: inkrypt-deploy-${{ github.repository }}-${{ inputs.domain }}
@@ -76,14 +66,12 @@ jobs:
       INKRYPT_RP_NAME: ${{ inputs.rp_name }}
       INKRYPT_COOKIE_SAMESITE: ${{ inputs.cookie_samesite }}
       INKRYPT_CORS_ORIGIN: ${{ inputs.cors_origin }}
-      INKRYPT_PAGES_PROJECT_NAME: ${{ inputs.pages_project_name }}
       INKRYPT_WORKER_NAME: ${{ inputs.worker_name }}
       INKRYPT_D1_NAME: ${{ inputs.d1_name }}
 
       # Safety toggles
       FORCE_TAKEOVER_DNS: ${{ inputs.force_takeover_dns }}
       FORCE_TAKEOVER_ROUTES: ${{ inputs.force_takeover_routes }}
-      WAIT_FOR_TLS: ${{ inputs.wait_for_tls }}
 
     steps:
       - name: Checkout
@@ -110,23 +98,11 @@ jobs:
           echo "CLOUDFLARE_ACCOUNT_ID=${{ steps.zone.outputs.account_id }}" >> "$GITHUB_ENV"
           echo "CLOUDFLARE_ZONE_ID=${{ steps.zone.outputs.zone_id }}" >> "$GITHUB_ENV"
 
-      - name: Ensure Pages project exists
-        run: node deploy/cf-api.mjs ensure-pages-project --account-id "${{ steps.zone.outputs.account_id }}" --project-name "${{ steps.cfg.outputs.pages_project_name }}" --production-branch main
-
       - name: Build web
         run: npm --workspace apps/web run build
 
-      - name: Deploy Pages (Direct Upload)
-        uses: cloudflare/pages-action@v1
-        with:
-          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-          accountId: ${{ steps.zone.outputs.account_id }}
-          projectName: ${{ steps.cfg.outputs.pages_project_name }}
-          directory: apps/web/dist
-          branch: main
-
-      - name: Bind custom domain + DNS (Pages)
-        run: node deploy/cf-api.mjs ensure-pages-domain --domain "${{ steps.cfg.outputs.domain }}" --account-id "${{ steps.zone.outputs.account_id }}" --project-name "${{ steps.cfg.outputs.pages_project_name }}" --zone-id "${{ steps.zone.outputs.zone_id }}" --cname-target "${{ steps.cfg.outputs.cname_target }}"
+      - name: Ensure DNS record (Worker-only)
+        run: node deploy/cf-api.mjs ensure-dns-a --zone-id "${{ steps.zone.outputs.zone_id }}" --name "${{ steps.cfg.outputs.domain }}"
 
       - name: Ensure D1 exists
         id: d1
@@ -197,7 +173,7 @@ jobs:
         run: npx wrangler deploy --name "${{ steps.cfg.outputs.worker_name }}" --cwd apps/worker --config wrangler.toml
 
       - name: Ensure Worker routes
-        run: node deploy/cf-api.mjs ensure-worker-routes --zone-id "${{ steps.zone.outputs.zone_id }}" --worker-name "${{ steps.cfg.outputs.worker_name }}" --route "${{ steps.cfg.outputs.domain }}/api/*,${{ steps.cfg.outputs.domain }}/auth/*,${{ steps.cfg.outputs.domain }}/healthz*"
+        run: node deploy/cf-api.mjs ensure-worker-routes --zone-id "${{ steps.zone.outputs.zone_id }}" --worker-name "${{ steps.cfg.outputs.worker_name }}" --route "${{ steps.cfg.outputs.domain }}/*"
 
       - name: Smoke test
         shell: bash

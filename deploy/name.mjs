@@ -114,15 +114,11 @@ const corsOrigin = corsOriginRaw || origin
 const slug = slugifyDomain(domain)
 const hash = shortHash(domain)
 
-const pagesProjectNameOverride = String(args['pages-project-name'] ?? process.env.INKRYPT_PAGES_PROJECT_NAME ?? '').trim()
 const workerNameOverride = String(args['worker-name'] ?? process.env.INKRYPT_WORKER_NAME ?? '').trim()
 const d1NameOverride = String(args['d1-name'] ?? process.env.INKRYPT_D1_NAME ?? '').trim()
 
-const pagesProjectName = pagesProjectNameOverride || buildName('inkrypt', slug, hash)
 const workerName = workerNameOverride || buildName('inkrypt-api', slug, hash)
 const d1Name = d1NameOverride || buildName('inkrypt', slug, hash)
-
-const cnameTarget = `${pagesProjectName}.pages.dev`
 
 const outputs = {
   domain,
@@ -131,10 +127,8 @@ const outputs = {
   rp_name: rpName,
   cors_origin: corsOrigin,
   cookie_samesite: cookieSameSite,
-  pages_project_name: pagesProjectName,
   worker_name: workerName,
   d1_name: d1Name,
-  cname_target: cnameTarget,
 }
 
 for (const [k, v] of Object.entries(outputs)) githubOutput(k, v)
